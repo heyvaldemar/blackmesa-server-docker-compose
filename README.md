@@ -48,7 +48,7 @@ docker compose -p blackmesa exec blackmesa-server rcon changelevel dm_gasworks
 
 ## Updating
 
-The pin lives in the `x-images` block at the top of the compose file, as an interpolation default, so a `git pull` delivers the image this repository has tested. The tag is `latest` because upstream publishes no version numbers: the digest is the version. When the game updates, Laclede's LAN rebuilds the image, the daily freshness check goes red, and the pin moves deliberately.
+The pin lives in the `x-images` block at the top of the compose file, as an interpolation default, so a `git pull` delivers the image this repository has tested. The tag is `latest` because upstream publishes no version numbers: the digest is the version. When the game updates, Laclede's LAN rebuilds the image, the daily freshness check goes red, and the pin moves deliberately. `./update.sh` does that on purpose: it moves to the latest release tag, refuses to cross a major unattended, and names any new required variable before anything has moved.
 
 ## Testing
 

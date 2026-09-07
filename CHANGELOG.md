@@ -9,15 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _(no unreleased changes yet)_
 
-## [1.0.0] - 2026-09-07
+## [1.1.0] - 2026-09-07
 
 ### Added
 
-- **A Black Mesa deathmatch server**, image pinned by digest as an
-  interpolation default, so `git pull` delivers the build this repository has
-  tested and `.env` overrides survive it. The tag is `latest` because upstream
-  publishes no version numbers: the digest is the version.
-- **A health check that matches the game exactly rather than as a substring.**
+- **`update.sh`: move between release tags on purpose.** It updates to the latest release (a combination this repository's CI has booted and smoke-tested), refuses to cross a major version unattended, refuses to run over local changes, and names any new required variable before anything has moved. `--dry-run` says what would happen.
+
+hes the game exactly rather than as a substring.**
   Two commands run in the container: `srcds_linux`, the game, and `srcds_run`,
   its restart wrapper. A substring search is satisfied by either, so the game
   can crash and leave the wrapper standing while the container reports
@@ -40,5 +38,6 @@ _(no unreleased changes yet)_
   suite. It deliberately does not boot the game: the image is 16 GB
   compressed, and a test that pretends a runner can hold it never runs.
 
-[Unreleased]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/releases/tag/v1.0.0
