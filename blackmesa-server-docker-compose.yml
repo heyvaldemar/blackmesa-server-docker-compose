@@ -1,0 +1,101 @@
+# Image pin lives HERE, as an interpolation default, so `git pull` (or
+# re-downloading this file) delivers the exact image this repository has
+# tested. Set BLACKMESA_SERVER_IMAGE_VERSION in .env to run a different tag
+# while the digest for it is fetched normally, or BLACKMESA_SERVER_IMAGE_TAG
+# to replace the whole reference. CI (the Trivy scan and check-pin-freshness)
+# reads the pin from this line: this block is the single source of truth.
+#
+# The tag is `latest` on purpose. Laclede's LAN rebuilds this image with the
+# current game baked in and publishes no version numbers, so the digest IS the
+# version: a game update arrives as a new digest under the same tag, the daily
+# freshness job goes red, and the pin moves deliberately.
+x-images:
+  blackmesa-server: &blackmesa-server-image ${BLACKMESA_SERVER_IMAGE_TAG:-lacledeslan/gamesvr-blackmesa:${BLACKMESA_SERVER_IMAGE_VERSION:-latest@sha256:fe7ca6321933af903fd0707b9472b5bcac1c795e35697e826f753704e0691456}}
+
+services:
+  blackmesa-server:
+    image: *blackmesa-server-image
+    # Handles untrusted input from the internet and cannot gain privileges
+    # through a setuid binary.
+    security_opt:
+      - no-new-privileges:true
+    # 3g is measured, not guessed: a deathmatch server peaked at 865 MB on the
+    # machine this template comes from. The ceiling is there so a leak here
+    # cannot pick a victim elsewhere — with no limit the kernel's OOM killer
+    # chooses by size, so the process it kills is rarely the one at fault.
+    deploy:
+      resources:
+        limits:
+          memory: ${BLACKMESA_SERVER_MEMORY_LIMIT:-3g}
+          cpus: "${BLACKMESA_SERVER_CPU_LIMIT:-2.0}"
+        reservations:
+          memory: ${BLACKMESA_SERVER_MEMORY_RESERVATION:-512m}
+          cpus: "${BLACKMESA_SERVER_CPU_RESERVATION:-0.5}"
+    ports:
+      # THE NUMBER MUST MATCH INSIDE AND OUT. Steam's server list records the
+      # port the server binds, not the one you forwarded. Publish 27016 for a
+      # server bound on 27015 and the list hands players an address where a
+      # different server answers: the connection succeeds, the handshake fails
+      # against the wrong game, and every log line blames the client.
+      - "${BLACKMESA_SERVER_PORT:-27015}:${BLACKMESA_SERVER_PORT:-27015}/udp"
+      # rcon is TCP on the same number.
+      - "${BLACKMESA_SERVER_PORT:-27015}:${BLACKMESA_SERVER_PORT:-27015}/tcp"
+    working_dir: /app
+    # 32-bit srcds: this build of Black Mesa ships no 64-bit server binary.
+    # `--net=host` hangs srcds at "Initializing Steam libraries" on a host with
+    # more than one interface, with no error; the container's own bridge
+    # namespace is why this starts.
+    command:
+      - ./srcds_run
+      - -game
+      - bms
+      - -console
+      - -usercon
+      - -port
+      - "${BLACKMESA_SERVER_PORT:-27015}"
+      - +maxplayers
+      - "${BLACKMESA_SERVER_MAX_PLAYERS:-16}"
+      - +map
+      - "${BLACKMESA_SERVER_START_MAP:-dm_crossfire}"
+      - +rcon_password
+      - "${BLACKMESA_SERVER_RCON_PASSWORD:?set in .env - see .env.example for generation command}"
+      - +mapcyclefile
+      - mapcycle.txt
+      # 0 and 0 = the map never changes on its own. With the single-entry
+      # rotation shipped here, drifting off the map this server exists for is
+      # impossible rather than unlikely. Set both in .env for a rotating server.
+      - +mp_timelimit
+      - "${BLACKMESA_SERVER_TIME_LIMIT:-0}"
+      - +mp_fraglimit
+      - "${BLACKMESA_SERVER_FRAG_LIMIT:-0}"
+    volumes:
+      - ./server.cfg:/app/bms/cfg/server.cfg:ro
+      # MOUNTED AT BOTH PATHS srcds may read a map cycle from. The engine looks
+      # in the game directory and in cfg/, depending on the build; one copy in
+      # the wrong place is a rotation that silently does not exist.
+      - ./mapcycle.txt:/app/bms/mapcycle.txt:ro
+      - ./mapcycle.txt:/app/bms/cfg/mapcycle.txt:ro
+    healthcheck:
+      # EXACT MATCH, BECAUSE THE WRAPPER IS ALSO CALLED srcds. Two commands run
+      # here: `srcds_linux`, the game, and `srcds_run`, the script that restarts
+      # it when it exits. A check for the substring `srcds` is satisfied by
+      # either, so the game can crash and leave the wrapper standing while the
+      # container reports healthy — and docker does not restart an unhealthy
+      # container by itself, so nothing else catches it. tests/e2e-healthcheck.sh
+      # proves the distinction against a real container.
+      test: ["CMD-SHELL", "grep -qsx srcds_linux /proc/[0-9]*/comm"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      # The game is baked into the image, and it is a large one: four minutes
+      # covers the first map load on a slow disk.
+      start_period: ${BLACKMESA_SERVER_START_PERIOD:-4m}
+    # srcds writes its state on the way out. Ten seconds and a SIGKILL is
+    # enough to lose the last round.
+    stop_grace_period: ${BLACKMESA_SERVER_STOP_GRACE_PERIOD:-30s}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: ${BLACKMESA_SERVER_LOG_MAX_SIZE:-10m}
+        max-file: "${BLACKMESA_SERVER_LOG_MAX_FILE:-3}"
