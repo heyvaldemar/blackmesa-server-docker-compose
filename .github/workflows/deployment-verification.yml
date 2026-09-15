@@ -44,9 +44,9 @@ jobs:
   scan-trivy:
     name: Scan pinned upstream image with Trivy
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # Findings surface in the Security tab for triage; they don't block CI.
-    continue-on-error: true
+    # Fifteen, not ten: this image bakes the game in, and walking a few
+    # gigabytes of it takes longer than a scan of a service image.
+    timeout-minutes: 15
     permissions:
       contents: read
       security-events: write
@@ -83,6 +83,21 @@ jobs:
           output: trivy-${{ matrix.name }}.sarif
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          # FINDINGS DO NOT FAIL THIS STEP; A BROKEN SCAN DOES. That is what
+          # exit-code 0 buys, and it is written here rather than left to the
+          # action's default because the job no longer carries
+          # continue-on-error and the difference now decides whether a red run
+          # means "a new CVE upstream" or "the scanner could not finish".
+          exit-code: "0"
+          # Vulnerabilities only. The secret scanner walks every file in the
+          # image, and this one contains the game: bms_maps_021.vpk alone is
+          # 257 MB. On 2026-09-14 it ran into Trivy's own deadline and the scan
+          # died with "semaphore acquire: context deadline exceeded", which
+          # skipped the SARIF upload, so nothing reached the Security tab
+          # either. Secret-scanning an upstream image nobody here builds was
+          # never the point; the CVEs in its packages are.
+          scanners: vuln
+          timeout: 12m
 
       - name: Upload Trivy SARIF (${{ matrix.name }}) to GitHub Security
         uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
