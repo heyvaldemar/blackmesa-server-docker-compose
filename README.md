@@ -1,6 +1,7 @@
 # Black Mesa server using Docker Compose
 
 [![Deployment Verification](https://github.com/heyvaldemar/blackmesa-server-docker-compose/actions/workflows/deployment-verification.yml/badge.svg?branch=main)](https://github.com/heyvaldemar/blackmesa-server-docker-compose/actions/workflows/deployment-verification.yml)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14897/badge)](https://www.bestpractices.dev/projects/14897)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A Black Mesa deathmatch server, pinned by digest, locked to `dm_crossfire` — the modern remake of the Half-Life map with the tactical-nuke button — with the details that only show up after running one.
