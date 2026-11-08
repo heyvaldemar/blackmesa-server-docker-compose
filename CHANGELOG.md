@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_(no unreleased changes yet)_
+
+## [1.2.2] - 2026-11-08
+
 ### Fixed
 
 - **The README names Docker Engine 29.4.2, which cuts this server off the network.** That release alone answers the 32-bit `socketcall` system call with ENOSYS in its default seccomp profile ([moby/moby#52506](https://github.com/moby/moby/issues/52506)); Black Mesa's srcds is 32-bit, so on it the server stays up and healthy and opens no socket: no A2S answer, no rcon (blackmesa-server-docker-compose run 42503040679, default profile against the profile Docker 29.4.3 ships). The fix is Docker 29.4.3 or later, or the daemon's `seccomp-profile` pointed at 29.4.3's profile. GitHub's ubuntu-26.04 runner image ships 29.4.2 ([actions/runner-images#14790](https://github.com/actions/runner-images/issues/14790)), so the new CI job below gives its daemon 29.4.3's profile on that version only.
 - **rcon works as the README says.** It said `docker compose -p blackmesa exec blackmesa-server rcon status`, and the pinned image has no rcon program (`command -v rcon` inside the running server is empty), so the command could only fail. `tools/rcon.sh` speaks the protocol from the server's network namespace, with python from a pinned image, and takes the password from `.env` on stdin, never in argv. A new CI job boots the real server from this compose file with a random RCON password and runs it: `status` must return the hostname line and a wrong password must be refused. The password itself, read from `cfg/secrets/rcon.cfg` since 1.2.1, was already accepted over the protocol (measured in tf2-server-docker-compose run 42499988775).
-
 ## [1.2.1] - 2026-11-08
 
 ### Security
@@ -62,7 +65,8 @@ hes the game exactly rather than as a substring.**
   suite. It deliberately does not boot the game: the image is 16 GB
   compressed, and a test that pretends a runner can hold it never runs.
 
-[Unreleased]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.0.0...v1.1.0
