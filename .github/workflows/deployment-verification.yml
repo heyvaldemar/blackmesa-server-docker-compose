@@ -116,7 +116,7 @@ jobs:
         # Pinned, and the same image a maintainer runs locally: Ubuntu's
         # packaged shellcheck is a different version with different defaults.
         run: |
-          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 tests/e2e-healthcheck.sh
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 tests/e2e-healthcheck.sh tests/e2e-rcon-secret.sh
 
       - name: Prove the exact match catches what a substring match misses
         # Assertions against a real container, with no game download: two
@@ -133,3 +133,13 @@ jobs:
           sed -E 's/^([A-Z0-9_]+)=$/\1=ci-placeholder/' .env.example > .env
           docker compose -f blackmesa-server-docker-compose.yml config >/dev/null
           echo "compose OK"
+
+      - name: The RCON password is on no command line
+        # It was +rcon_password on srcds's command line for as long as the
+        # server ran, readable by every user on the host. The game image is
+        # too large for a runner, so the compose file's own entrypoint, command
+        # and tmpfs run against a stand-in srcds_run, and every command line on
+        # the runner and in the container is read for the password.
+        run: |
+          chmod +x tests/e2e-rcon-secret.sh
+          ./tests/e2e-rcon-secret.sh

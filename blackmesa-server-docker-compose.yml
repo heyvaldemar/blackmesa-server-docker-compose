@@ -52,6 +52,30 @@ services:
       # somewhere else, and two clocks make that arithmetic. UTC by
       # default, which is a choice rather than an accident.
       TZ: ${BLACKMESA_SERVER_TIMEZONE:-UTC}
+      # Read by the entrypoint below into cfg/secrets/rcon.cfg, never put on a command line.
+      BLACKMESA_SERVER_RCON_PASSWORD: ${BLACKMESA_SERVER_RCON_PASSWORD:?set in .env - see .env.example for generation command}
+    # THE RCON PASSWORD GOES IN A FILE, NOT ON THE COMMAND LINE. As
+    # +rcon_password it sat in srcds's arguments for as long as the server ran,
+    # and every user on the host reads a process's arguments with ps. This
+    # writes it with the shell's own printf into cfg/secrets/rcon.cfg, on a
+    # tmpfs so it never touches a disk, then runs the command below, which
+    # carries +exec secrets/rcon.cfg instead. A value with a double quote,
+    # which a Source config line cannot carry, stops the start.
+    # tests/e2e-rcon-secret.sh runs exactly this against a stand-in srcds_run.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        case "$$BLACKMESA_SERVER_RCON_PASSWORD" in
+          "") echo "BLACKMESA_SERVER_RCON_PASSWORD is not set" >&2; exit 1 ;;
+          *\"*) echo "BLACKMESA_SERVER_RCON_PASSWORD holds a double quote, which a Source config line cannot carry" >&2; exit 1 ;;
+        esac
+        umask 077
+        printf "rcon_password \"%s\"\n" "$$BLACKMESA_SERVER_RCON_PASSWORD" > bms/cfg/secrets/rcon.cfg || exit 1
+        exec "$$@"
+      - start-server
+    tmpfs:
+      - /app/bms/cfg/secrets:mode=1777,size=64k
     command:
       - ./srcds_run
       - -game
@@ -64,8 +88,9 @@ services:
       - "${BLACKMESA_SERVER_MAX_PLAYERS:-16}"
       - +map
       - "${BLACKMESA_SERVER_START_MAP:-dm_crossfire}"
-      - +rcon_password
-      - "${BLACKMESA_SERVER_RCON_PASSWORD:?set in .env - see .env.example for generation command}"
+      # The RCON password, from the file the entrypoint above writes.
+      - +exec
+      - secrets/rcon.cfg
       - +mapcyclefile
       - mapcycle.txt
       # 0 and 0 = the map never changes on its own. With the single-entry

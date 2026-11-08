@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **The RCON password is no longer on the server's command line.** It was passed to srcds as `+rcon_password <password>`, so it sat in its arguments for as long as the server ran, where every user on the host reads it with `ps` (`/proc/<pid>/cmdline` is world-readable, and the host sees every container's processes). The compose file now hands it to the container as an environment variable; a short entrypoint writes it with the shell's own `printf` into `cfg/secrets/rcon.cfg`, on a tmpfs so it never touches a disk, mode 600, and the command line carries `+exec secrets/rcon.cfg` in its place. A password holding a double quote, which a Source config line cannot carry, stops the start with a message instead of being cut. The game image is too large for a CI runner, so the new `tests/e2e-rcon-secret.sh` runs the compose file's own entrypoint, command and tmpfs against a stand-in `srcds_run` and reads every command line on the runner and in the container: none may carry the password. Against the previous compose file the same test fails all seven of its checks. The same mechanism is proven against a real Source server in the l4d2 and tf2 templates, where CI boots the game and RCON answers with the password from the file.
+
 ### Changed
 
 - **The freshness check has its own workflow, Pin Freshness.** It ran inside Deployment Verification, whose badge is the one at the top of this README. Across the fleet, nine red runs in ten were a pin one version behind - which the fleet's triage moves within the day - and a reader cannot tell that from a stack that does not boot. The badge now says whether the stack boots. The job itself is unchanged.
