@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_(no unreleased changes yet)_
+
+## [1.3.0] - 2026-11-08
+
 ### Changed
 
 - **The health check asks the game, not its process.** It looked for `srcds_linux` in `/proc`, and on Docker Engine 29.4.2 that stayed green over a server with no socket at all (run 42503040679); a hung or stopped game keeps its process too. `tools/healthcheck.sh`, mounted read-only, now sends A2S_INFO to the game port at the address it answers on (the one it is bound to, or the container's own when it binds 0.0.0.0, as Left 4 Dead 2 does) and is healthy only on the engine's reply; it handles the challenge Source servers may answer with first, tries twice for a map change, and ends within 7 seconds. It asks from inside the container, so it does not prove the port is published on the host or open in a firewall; the README says so. CI runs it in the pinned image against a stand-in, and on the real server changes the map and needs it answering again, stops the game with SIGSTOP and needs it red, and gives the container Docker 29.4.2's seccomp profile and needs it red with nothing bound while the old check stays green.
 - **The README's Testing section said CI does not boot the game.** It has since v1.2.2; the section now lists what the boot job checks.
-
 ## [1.2.2] - 2026-11-08
 
 ### Fixed
@@ -68,7 +71,8 @@ hes the game exactly rather than as a substring.**
   suite. It deliberately does not boot the game: the image is 16 GB
   compressed, and a test that pretends a runner can hold it never runs.
 
-[Unreleased]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.1.0...v1.2.0
