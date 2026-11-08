@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_(no unreleased changes yet)_
+
+## [1.2.1] - 2026-11-08
+
 ### Security
 
 - **The RCON password is no longer on the server's command line.** It was passed to srcds as `+rcon_password <password>`, so it sat in its arguments for as long as the server ran, where every user on the host reads it with `ps` (`/proc/<pid>/cmdline` is world-readable, and the host sees every container's processes). The compose file now hands it to the container as an environment variable; a short entrypoint writes it with the shell's own `printf` into `cfg/secrets/rcon.cfg`, on a tmpfs so it never touches a disk, mode 600, and the command line carries `+exec secrets/rcon.cfg` in its place. A password holding a double quote, which a Source config line cannot carry, stops the start with a message instead of being cut. The game image is too large for a CI runner, so the new `tests/e2e-rcon-secret.sh` runs the compose file's own entrypoint, command and tmpfs against a stand-in `srcds_run` and reads every command line on the runner and in the container: none may carry the password. Against the previous compose file the same test fails all seven of its checks.
@@ -55,7 +59,8 @@ hes the game exactly rather than as a substring.**
   suite. It deliberately does not boot the game: the image is 16 GB
   compressed, and a test that pretends a runner can hold it never runs.
 
-[Unreleased]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/releases/tag/v1.0.0
