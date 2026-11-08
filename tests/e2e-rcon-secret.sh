@@ -6,9 +6,10 @@
 # arguments with ps. The compose file's entrypoint now writes it into
 # cfg/secrets/rcon.cfg and the command carries `+exec secrets/rcon.cfg`.
 #
-# The game image is too large for a runner, so this runs the compose file's own
-# entrypoint, command, tmpfs and environment (docker compose run, not a copy)
-# with a stand-in srcds_run that records what it was given and stays up. While
+# This runs the compose file's own entrypoint, command, tmpfs and environment
+# (docker compose run, not a copy) with a stand-in srcds_run that records what
+# it was given and stays up, in seconds; the boot job in CI runs the real
+# server and RCON against it. While
 # it runs, every command line on this machine and in the container is read for
 # the password, compared through a file so it is never printed.
 #

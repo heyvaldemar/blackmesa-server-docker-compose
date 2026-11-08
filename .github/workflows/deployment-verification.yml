@@ -116,7 +116,7 @@ jobs:
         # Pinned, and the same image a maintainer runs locally: Ubuntu's
         # packaged shellcheck is a different version with different defaults.
         run: |
-          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 tests/e2e-healthcheck.sh tests/e2e-rcon-secret.sh
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 tools/*.sh tests/e2e-healthcheck.sh tests/e2e-rcon-secret.sh
 
       - name: Prove the exact match catches what a substring match misses
         # Assertions against a real container, with no game download: two
@@ -143,3 +143,99 @@ jobs:
         run: |
           chmod +x tests/e2e-rcon-secret.sh
           ./tests/e2e-rcon-secret.sh
+
+  boot:
+    name: The real server, and rcon against it
+    # THE README'S COMMAND IS RUN, NOT ONLY WRITTEN. Up to v1.2 it named an
+    # rcon program the image does not carry, and nothing here ever ran it.
+    # This boots the pinned image from this compose file with a random RCON
+    # password and runs tools/rcon.sh, the command the README now gives: the
+    # hostname line must come back, and a wrong password must be refused.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      COMPOSE: docker compose -f blackmesa-server-docker-compose.yml -p blackmesa
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Make room for the image
+        # 17.75 GB compressed; a runner starts with less free than its
+        # unpacked size on the root disk.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/share/boost
+          df -h / | tail -1
+
+      - name: Docker 29.4.2 answers socketcall with ENOSYS; give its daemon the profile 29.4.3 ships
+        # Docker Engine 29.4.2, and that release alone, blocks the 32-bit
+        # socketcall(2) system call in its default seccomp profile
+        # (moby/moby#52506; the ubuntu-26.04 runner image ships it,
+        # actions/runner-images#14790). Black Mesa's srcds, a 32-bit program,
+        # makes every socket through it, so on 29.4.2 it stays up and healthy
+        # and opens no socket at all: no A2S answer, no rcon. 29.4.3 reverted
+        # the rule. On that version, and only there, the daemon gets the default
+        # profile 29.4.3 ships (moby/profiles seccomp v0.2.3), pinned by commit
+        # and checksum. Measured: blackmesa-server-docker-compose run
+        # 42503040679.
+        run: |
+          v="$(docker version --format '{{.Server.Version}}')"
+          if [ "$v" != 29.4.2 ]; then echo "Docker $v: its own profile allows socketcall"; exit 0; fi
+          sudo curl -fsSL -o /etc/docker/seccomp-29.4.3.json \
+            https://raw.githubusercontent.com/moby/profiles/836ae4d37ef2ec995c77c99fc55f5b5f3af3a897/seccomp/default.json
+          echo "536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74  /etc/docker/seccomp-29.4.3.json" | sha256sum -c -
+          f=/etc/docker/daemon.json
+          [ -s "$f" ] || echo '{}' | sudo tee "$f" >/dev/null
+          sudo jq '. + {"seccomp-profile": "/etc/docker/seccomp-29.4.3.json"}' "$f" | sudo tee "$f.new" >/dev/null
+          sudo mv "$f.new" "$f"
+          sudo systemctl restart docker
+          docker info --format '{{.SecurityOptions}}'
+
+      - name: Start the stack with a random RCON password
+        run: |
+          sed -E 's/^([A-Z0-9_]+)=$/\1=ci-placeholder/' .env.example > .env
+          sed -i "s/^BLACKMESA_SERVER_RCON_PASSWORD=.*/BLACKMESA_SERVER_RCON_PASSWORD=$(openssl rand -hex 16)/" .env
+          $COMPOSE up -d
+
+      - name: Wait for the health check to go green
+        run: |
+          cid="$($COMPOSE ps -q blackmesa-server)"
+          for _ in $(seq 1 60); do
+            s="$(docker inspect "$cid" --format '{{.State.Health.Status}}' 2>/dev/null || echo none)"
+            [ "$s" = healthy ] && { echo "health: $s"; exit 0; }
+            [ "$s" = unhealthy ] && break
+            sleep 10
+          done
+          echo "::error::the server never reported healthy"
+          $COMPOSE logs --tail 80
+          exit 1
+
+      - name: The old README command could not work
+        run: |
+          if $COMPOSE exec -T blackmesa-server sh -c 'command -v rcon'; then
+            echo "::error::the image now carries an rcon program; the README could name it again"; exit 1
+          fi
+          echo "no rcon program in the image, as the README now says"
+
+      - name: tools/rcon.sh answers, and refuses a wrong password
+        run: |
+          # Healthy is the process; srcds opens its rcon socket once the map
+          # has loaded, so a refused connection (exit 1) is retried.
+          for _ in $(seq 1 30); do
+            rc=0; out="$(tools/rcon.sh status 2>&1)" || rc=$?
+            [ "$rc" = 1 ] || break
+            sleep 10
+          done
+          printf '%s\n' "$out" | head -5
+          grep -q '^hostname' <<<"$out" || { echo "::error::status did not return the hostname line (exit $rc)"; exit 1; }
+          cp .env .env.good
+          sed -i 's/^BLACKMESA_SERVER_RCON_PASSWORD=.*/BLACKMESA_SERVER_RCON_PASSWORD=not-the-password/' .env
+          rc=0; tools/rcon.sh status || rc=$?
+          mv .env.good .env
+          [ "$rc" = 2 ] || { echo "::error::a wrong password was not refused (exit $rc)"; exit 1; }
+          echo "a wrong password: refused, exit 2"
+
+      - name: Stop
+        if: always()
+        run: $COMPOSE down -v --remove-orphans

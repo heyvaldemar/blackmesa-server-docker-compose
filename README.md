@@ -36,6 +36,8 @@ Everyone who joins needs to own Black Mesa. There are no bots: this is player-ve
 
 **The memory ceiling is measured, not guessed.** A deathmatch server peaked at 865 MB; the 3 GB limit exists so a leak here cannot get some other container killed instead.
 
+**Docker Engine 29.4.2 cuts this server off the network, and only that release does.** Its default seccomp profile answers the 32-bit `socketcall` system call with "not implemented" ([moby/moby#52506](https://github.com/moby/moby/issues/52506); for GitHub Actions, the ubuntu-26.04 runner image ships it: [actions/runner-images#14790](https://github.com/actions/runner-images/issues/14790), with the move to 29.7.2 in [actions/runner-images#15205](https://github.com/actions/runner-images/pull/15205)), and Black Mesa's srcds is a 32-bit program that makes every socket with it. The server starts, stays up, and opens no socket at all: no player can reach it, A2S gets no answer, rcon gets no connection, and the health check, which looks for the process, stays green. Measured in [a CI run on GitHub's ubuntu-26.04 runner, which ships 29.4.2](https://github.com/heyvaldemar/tf2-server-docker-compose/blob/main/docs/evidence/docker-29.4.2-socketcall.md): on the default profile healthy, no A2S answer and no rcon after 90 seconds; with the profile Docker 29.4.3 ships, both answered. 29.4.3 reverted the rule, and Ubuntu 26.04's own `docker.io` (27.5.1) never had it. Check with `docker version --format '{{.Server.Version}}'` and upgrade; until you can, point [`seccomp-profile` in `daemon.json`](https://docs.docker.com/reference/cli/dockerd/#daemon-configuration-file) at [moby/profiles seccomp v0.2.3](https://github.com/moby/profiles/blob/836ae4d37ef2ec995c77c99fc55f5b5f3af3a897/seccomp/default.json) and restart Docker.
+
 ## Hiding your home address
 
 If you run this at home, the server's address is in Steam's public list. To keep it off, put the game container in the network namespace of a WireGuard sidecar that dials out to a cheap relay: [game-server-wireguard-relay-docker-compose](https://github.com/heyvaldemar/game-server-wireguard-relay-docker-compose). One warning if you go that way: `network_mode: host` hangs srcds at Steam initialisation on a machine with more than one interface, with no error. The sidecar's namespace is bridge-style, which is why these servers start at all.
@@ -43,9 +45,12 @@ If you run this at home, the server's address is in Steam's public list. To keep
 ## Administration
 
 ```bash
-docker compose -p blackmesa exec blackmesa-server rcon status
-docker compose -p blackmesa exec blackmesa-server rcon changelevel dm_gasworks
+# rcon, using the password from .env
+tools/rcon.sh status
+tools/rcon.sh changelevel dm_gasworks
 ```
+
+Up to v1.2 this said `docker compose -p blackmesa exec blackmesa-server rcon status`. The image has no rcon program, so that command could only fail, and nothing ever ran it. `tools/rcon.sh` speaks the rcon protocol from the server's network namespace, with python from a pinned image, and takes the password from `.env` on stdin rather than the command line where `ps` would show it. CI boots the real server from this file and runs it: `status` must return the hostname line, and a wrong password must be refused.
 
 ## Updating
 
