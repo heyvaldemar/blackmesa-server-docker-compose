@@ -100,6 +100,8 @@ services:
       - +mp_fraglimit
       - "${BLACKMESA_SERVER_FRAG_LIMIT:-0}"
     volumes:
+      # The health check: A2S_INFO to the game port (see healthcheck: below).
+      - ./tools/healthcheck.sh:/healthcheck.sh:ro
       - ./server.cfg:/app/bms/cfg/server.cfg:ro
       # MOUNTED AT BOTH PATHS srcds may read a map cycle from. The engine looks
       # in the game directory and in cfg/, depending on the build; one copy in
@@ -107,14 +109,21 @@ services:
       - ./mapcycle.txt:/app/bms/mapcycle.txt:ro
       - ./mapcycle.txt:/app/bms/cfg/mapcycle.txt:ro
     healthcheck:
-      # EXACT MATCH, BECAUSE THE WRAPPER IS ALSO CALLED srcds. Two commands run
-      # here: `srcds_linux`, the game, and `srcds_run`, the script that restarts
-      # it when it exits. A check for the substring `srcds` is satisfied by
-      # either, so the game can crash and leave the wrapper standing while the
-      # container reports healthy — and docker does not restart an unhealthy
-      # container by itself, so nothing else catches it. tests/e2e-healthcheck.sh
-      # proves the distinction against a real container.
-      test: ["CMD-SHELL", "grep -qsx srcds_linux /proc/[0-9]*/comm"]
+      # THE GAME'S OWN ANSWER, NOT ITS PROCESS. tools/healthcheck.sh sends
+      # A2S_INFO, the query every server browser sends, to the game port and is
+      # healthy only on the engine's reply. Up to v1.2.2 this looked for
+      # srcds_linux in /proc, and on Docker Engine 29.4.2 this server ran with
+      # no socket at all and stayed healthy (run 42503040679): its 32-bit srcds
+      # makes sockets through socketcall(2), which that release's seccomp
+      # profile refuses. A hung or stopped game keeps its process too. The log
+      # is not read either. A map change silences it for seconds; the check
+      # tries twice and Docker allows three misses at this interval. Each check
+      # ends within 9 seconds.
+      # It asks from inside the container: it does not prove the port is
+      # published on the host or open in a firewall.
+      # CI runs it in the pinned image against a stand-in, and on the real
+      # server under 29.4.2's profile and with the game stopped it must go red.
+      test: ["CMD", "bash", "/healthcheck.sh", "${BLACKMESA_SERVER_PORT:-27015}"]
       interval: 60s
       timeout: 10s
       retries: 3

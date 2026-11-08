@@ -118,16 +118,6 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 tools/*.sh tests/e2e-healthcheck.sh tests/e2e-rcon-secret.sh
 
-      - name: Prove the exact match catches what a substring match misses
-        # Assertions against a real container, with no game download: two
-        # processes named cs2 and cs2.sh are the whole fixture. The game is
-        # killed and the exact check must go red while the substring check
-        # stays green - if the substring form ever failed too, the comment in
-        # the compose file would be wrong and the run says so.
-        run: |
-          chmod +x tests/e2e-healthcheck.sh
-          ./tests/e2e-healthcheck.sh
-
       - name: The compose file parses with the shipped defaults
         run: |
           sed -E 's/^([A-Z0-9_]+)=$/\1=ci-placeholder/' .env.example > .env
@@ -211,6 +201,16 @@ jobs:
           $COMPOSE logs --tail 80
           exit 1
 
+      - name: The health check goes by the game's answer, in the pinned image
+        # tools/healthcheck.sh is healthy only on the engine's reply to
+        # A2S_INFO. Run in the pinned image (here, where the image is already
+        # pulled), so its tools are proven there, against a stand-in that
+        # answers, answers after a challenge, stays silent, or is not there at
+        # all (tests/fixtures/fake-a2s.py).
+        run: |
+          chmod +x tests/e2e-healthcheck.sh
+          ./tests/e2e-healthcheck.sh
+
       - name: The old README command could not work
         run: |
           if $COMPOSE exec -T blackmesa-server sh -c 'command -v rcon'; then
@@ -220,8 +220,9 @@ jobs:
 
       - name: tools/rcon.sh answers, and refuses a wrong password
         run: |
-          # Healthy is the process; srcds opens its rcon socket once the map
-          # has loaded, so a refused connection (exit 1) is retried.
+          # Healthy means the engine answered A2S_INFO; a refused rcon
+          # connection (exit 1) is still retried, as it was when healthy
+          # meant only the process.
           for _ in $(seq 1 30); do
             rc=0; out="$(tools/rcon.sh status 2>&1)" || rc=$?
             [ "$rc" = 1 ] || break
@@ -235,6 +236,81 @@ jobs:
           mv .env.good .env
           [ "$rc" = 2 ] || { echo "::error::a wrong password was not refused (exit $rc)"; exit 1; }
           echo "a wrong password: refused, exit 2"
+
+      - name: The health check answers again after a map change
+        # A changelevel silences A2S_INFO while the next map loads. The check
+        # must answer again within two minutes, on the new map, and Docker's
+        # status (three misses at a 60-second interval) must stay healthy.
+        run: |
+          cid="$($COMPOSE ps -q blackmesa-server)"
+          docker exec "$cid" bash /healthcheck.sh 27015
+          tools/rcon.sh changelevel dm_bounce >/dev/null
+          t0=$SECONDS; misses=0; ok=""
+          while [ $((SECONDS - t0)) -lt 120 ]; do
+            if docker exec "$cid" bash /healthcheck.sh 27015 >/dev/null 2>&1; then
+              [ $((SECONDS - t0)) -ge 15 ] && { ok=1; break; }
+            else
+              misses=$((misses + 1))
+            fi
+            sleep 2
+          done
+          map="$(tools/rcon.sh status | sed -n 's/^map *: *\([^ ]*\).*/\1/p')"
+          s="$(docker inspect "$cid" --format '{{.State.Health.Status}}')"
+          echo "after changelevel: map ${map:-?}, $misses missed checks, answering at $((SECONDS - t0))s, docker health: $s"
+          [ "$ok" = 1 ] || { echo "::error::the game did not answer again within two minutes of the map change"; exit 1; }
+          [ "$map" = dm_bounce ] || { echo "::error::the map did not change, so this proved nothing"; exit 1; }
+          [ "$s" = healthy ] || { echo "::error::docker called it $s across a map change"; exit 1; }
+
+      - name: Plant - a stopped game keeps its process, and the check goes red
+        # The check up to v1.2.2 looked for srcds_linux in /proc. SIGSTOP
+        # leaves the process there and the game deaf: that check must still
+        # pass and this one fail; after SIGCONT this one passes again.
+        run: |
+          cid="$($COMPOSE ps -q blackmesa-server)"
+          # shellcheck disable=SC2016  # expanded by the container's shell
+          pid="$(docker exec "$cid" sh -c 'for p in /proc/[0-9]*; do [ "$(cat "$p/comm" 2>/dev/null)" = srcds_linux ] && echo "${p#/proc/}"; done' | head -1)"
+          [ -n "$pid" ] || { echo "::error::no srcds_linux process to stop"; exit 1; }
+          docker exec "$cid" sh -c "kill -STOP $pid"
+          o=0; docker exec "$cid" sh -c "grep -qsx srcds_linux /proc/[0-9]*/comm" || o=$?
+          n=0; docker exec "$cid" bash /healthcheck.sh 27015 || n=$?
+          docker exec "$cid" sh -c "kill -CONT $pid"
+          echo "game stopped: the old check exits $o, the new one $n"
+          [ "$o" = 0 ] && [ "$n" = 1 ] || { echo "::error::expected the old check to pass (0) and the new one to fail (1)"; exit 1; }
+          for _ in $(seq 1 15); do
+            docker exec "$cid" bash /healthcheck.sh 27015 && exit 0
+            sleep 2
+          done
+          echo "::error::the game did not answer again after SIGCONT"; exit 1
+
+      - name: Plant - Docker 29.4.2's seccomp profile, the server it left healthy with no socket
+        # The false green this check exists for, reproduced on any Docker: the
+        # container gets the default profile Docker 29.4.2 shipped (moby/profiles
+        # seccomp v0.2.2, pinned by commit and checksum), whose rule answers
+        # 32-bit socketcall(2) with ENOSYS. srcds then runs with no socket. The
+        # old /proc check must pass and this one fail, saying nothing is bound;
+        # recreated without it, the server must answer again.
+        run: |
+          curl -fsSL -o .ci-seccomp-0.2.2.json \
+            https://raw.githubusercontent.com/moby/profiles/d62da2729e94ffb023ed7c5e215f65a726fafd82/seccomp/default.json
+          echo "1a4d017730647621403920d9558aa0152adef04dd89ed7720e4abafa24551999  .ci-seccomp-0.2.2.json" | sha256sum -c -
+          jq -e '.syscalls[] | select(.names == ["socketcall"] and .action == "SCMP_ACT_ERRNO" and .errnoRet == 38)' .ci-seccomp-0.2.2.json >/dev/null
+          printf '%s\n' 'services:' '  blackmesa-server:' '    security_opt:' "      - seccomp=$PWD/.ci-seccomp-0.2.2.json" > .ci-seccomp.yml
+          $COMPOSE -f .ci-seccomp.yml up -d --force-recreate blackmesa-server
+          cid="$($COMPOSE ps -q blackmesa-server)"
+          sleep 120
+          o=0; docker exec "$cid" sh -c "grep -qsx srcds_linux /proc/[0-9]*/comm" || o=$?
+          n=0; out="$(docker exec "$cid" bash /healthcheck.sh 27015 2>&1)" || n=$?
+          st="$(docker inspect "$cid" --format '{{.State.Status}} restarts={{.RestartCount}}')"
+          echo "under 29.4.2's profile, 120 s in ($st): the old check exits $o, the new one $n: $out"
+          rm -f .ci-seccomp.yml .ci-seccomp-0.2.2.json
+          [ "$o" = 0 ] && [ "$n" = 1 ] && [[ $out == *"nothing is bound"* ]] || { echo "::error::expected a live process (0) and no socket (1, nothing is bound)"; exit 1; }
+          $COMPOSE up -d --force-recreate blackmesa-server
+          cid="$($COMPOSE ps -q blackmesa-server)"
+          for _ in $(seq 1 30); do
+            docker exec "$cid" bash /healthcheck.sh 27015 2>/dev/null && exit 0
+            sleep 10
+          done
+          echo "::error::recreated with the daemon's profile, the server did not answer again"; exit 1
 
       - name: Stop
         if: always()

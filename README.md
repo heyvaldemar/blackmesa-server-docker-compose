@@ -17,14 +17,14 @@ The game is baked into the image, so the first start is a 16 GB pull and then a 
 
 ```bash
 docker compose -p blackmesa logs -f blackmesa-server
-docker compose -p blackmesa ps          # healthy once srcds is up
+docker compose -p blackmesa ps          # healthy once the game answers A2S_INFO
 ```
 
 Everyone who joins needs to own Black Mesa. There are no bots: this is player-versus-player only.
 
 ## What this file knows that a fresh one does not
 
-**The health check matches the game exactly, not as a substring.** Two commands run in this container: `srcds_linux`, the game, and `srcds_run`, the script that restarts it. A check for the substring `srcds` is satisfied by either, so the game can crash and leave the wrapper standing while the container reports healthy — and docker does not restart an unhealthy container on its own, so nothing else catches it either. `tests/e2e-healthcheck.sh` proves the distinction against a real container.
+**The health check asks the game, not its process.** `tools/healthcheck.sh` sends A2S_INFO, the query every server browser sends, to the game port and is healthy only on the engine's reply. Up to v1.2.2 it looked for `srcds_linux` in `/proc`, and on Docker Engine 29.4.2 that stayed green over a server with no socket at all (below). A hung or stopped game keeps its process too, and the log is not read either. A map change silences it for seconds; one check tries twice, and Docker allows three misses at a 60-second interval. Each check ends within 9 seconds. **It asks from inside the container**, at the address the game is bound to: healthy proves the server answers there, not that the port is published on the host or open in your firewall. Check that from outside, with a server browser.
 
 **The map cannot drift.** `mp_timelimit 0` and `mp_fraglimit 0` on the command line mean the map never changes on its own, and the one-entry `mapcycle.txt` is mounted at both paths srcds may read it from, because one copy in the wrong place is a rotation that silently does not exist. For a rotating server, set a time limit in `.env` and add maps.
 
@@ -36,7 +36,7 @@ Everyone who joins needs to own Black Mesa. There are no bots: this is player-ve
 
 **The memory ceiling is measured, not guessed.** A deathmatch server peaked at 865 MB; the 3 GB limit exists so a leak here cannot get some other container killed instead.
 
-**Docker Engine 29.4.2 cuts this server off the network, and only that release does.** Its default seccomp profile answers the 32-bit `socketcall` system call with "not implemented" ([moby/moby#52506](https://github.com/moby/moby/issues/52506); for GitHub Actions, the ubuntu-26.04 runner image ships it: [actions/runner-images#14790](https://github.com/actions/runner-images/issues/14790), with the move to 29.7.2 in [actions/runner-images#15205](https://github.com/actions/runner-images/pull/15205)), and Black Mesa's srcds is a 32-bit program that makes every socket with it. The server starts, stays up, and opens no socket at all: no player can reach it, A2S gets no answer, rcon gets no connection, and the health check, which looks for the process, stays green. Measured in [a CI run on GitHub's ubuntu-26.04 runner, which ships 29.4.2](https://github.com/heyvaldemar/tf2-server-docker-compose/blob/main/docs/evidence/docker-29.4.2-socketcall.md): on the default profile healthy, no A2S answer and no rcon after 90 seconds; with the profile Docker 29.4.3 ships, both answered. 29.4.3 reverted the rule, and Ubuntu 26.04's own `docker.io` (27.5.1) never had it. Check with `docker version --format '{{.Server.Version}}'` and upgrade; until you can, point [`seccomp-profile` in `daemon.json`](https://docs.docker.com/reference/cli/dockerd/#daemon-configuration-file) at [moby/profiles seccomp v0.2.3](https://github.com/moby/profiles/blob/836ae4d37ef2ec995c77c99fc55f5b5f3af3a897/seccomp/default.json) and restart Docker.
+**Docker Engine 29.4.2 cuts this server off the network, and only that release does.** Its default seccomp profile answers the 32-bit `socketcall` system call with "not implemented" ([moby/moby#52506](https://github.com/moby/moby/issues/52506); for GitHub Actions, the ubuntu-26.04 runner image ships it: [actions/runner-images#14790](https://github.com/actions/runner-images/issues/14790), with the move to 29.7.2 in [actions/runner-images#15205](https://github.com/actions/runner-images/pull/15205)), and Black Mesa's srcds is a 32-bit program that makes every socket with it. The server starts, stays up, and opens no socket at all: no player can reach it, A2S gets no answer, rcon gets no connection, and the health check up to v1.2.2, which looked for the process, stayed green; the one since v1.3.0 asks the game and goes red, and CI reproduces exactly this to prove it. Measured in [a CI run on GitHub's ubuntu-26.04 runner, which ships 29.4.2](https://github.com/heyvaldemar/tf2-server-docker-compose/blob/main/docs/evidence/docker-29.4.2-socketcall.md): on the default profile healthy, no A2S answer and no rcon after 90 seconds; with the profile Docker 29.4.3 ships, both answered. 29.4.3 reverted the rule, and Ubuntu 26.04's own `docker.io` (27.5.1) never had it. Check with `docker version --format '{{.Server.Version}}'` and upgrade; until you can, point [`seccomp-profile` in `daemon.json`](https://docs.docker.com/reference/cli/dockerd/#daemon-configuration-file) at [moby/profiles seccomp v0.2.3](https://github.com/moby/profiles/blob/836ae4d37ef2ec995c77c99fc55f5b5f3af3a897/seccomp/default.json) and restart Docker.
 
 ## Hiding your home address
 
@@ -58,11 +58,15 @@ The pin lives in the `x-images` block at the top of the compose file, as an inte
 
 ## Testing
 
-`tests/e2e-healthcheck.sh` runs five assertions against a real container and needs no game download: the exact check is green with the game running, the substring check is green too, and after the game is killed the exact one goes red while the substring one stays green with the wrapper still standing.
+CI boots the real server on every push, from the 16 GB image, and then:
 
-CI runs it on every push alongside shell and workflow linting, a Trivy scan of the pinned image, and a daily check that the pin still resolves to what upstream publishes.
+- runs `tools/rcon.sh status` and needs the hostname line back, and a wrong password refused;
+- runs the health check in the pinned image against a stand-in that answers A2S_INFO, answers after a challenge, stays silent, or is not there: healthy, healthy, unhealthy within 9 seconds, unhealthy (`tests/e2e-healthcheck.sh`);
+- changes the map over rcon and needs the health check to answer again on the new map, with Docker's status healthy throughout;
+- **stops the game process** with SIGSTOP: the process stays, the old `/proc` check still passes, and the health check must fail; after SIGCONT it must pass again;
+- **gives the container the seccomp profile Docker 29.4.2 shipped**: the server runs with no socket, the old check passes, and the health check must fail saying nothing is bound; recreated without it, the server must answer again.
 
-CI does not boot the game. The image is 16 GB compressed, which is more than a GitHub runner has to give, and a test that pretends otherwise is a test that never runs.
+All of it alongside shell and workflow linting, a Trivy scan of the pinned image, and a daily check that the pin still resolves to what upstream publishes.
 
 ---
 

@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_(no unreleased changes yet)_
+### Changed
+
+- **The health check asks the game, not its process.** It looked for `srcds_linux` in `/proc`, and on Docker Engine 29.4.2 that stayed green over a server with no socket at all (run 42503040679); a hung or stopped game keeps its process too. `tools/healthcheck.sh`, mounted read-only, now sends A2S_INFO to the game port at the address the game is bound to and is healthy only on the engine's reply; it handles the challenge Source servers may answer with first, tries twice for a map change, and ends within 9 seconds. It asks from inside the container, so it does not prove the port is published on the host or open in a firewall; the README says so. CI runs it in the pinned image against a stand-in, and on the real server changes the map and needs it answering again, stops the game with SIGSTOP and needs it red, and gives the container Docker 29.4.2's seccomp profile and needs it red with nothing bound while the old check stays green.
+- **The README's Testing section said CI does not boot the game.** It has since v1.2.2; the section now lists what the boot job checks.
 
 ## [1.2.2] - 2026-11-08
 
