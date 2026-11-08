@@ -301,13 +301,25 @@ jobs:
           printf '%s\n' 'services:' '  blackmesa-server:' '    security_opt:' "      - seccomp=$PWD/.ci-seccomp-0.2.2.json" > .ci-seccomp.yml
           $COMPOSE -f .ci-seccomp.yml up -d --force-recreate blackmesa-server
           cid="$($COMPOSE ps -q blackmesa-server)"
-          sleep 120
-          o=0; docker exec "$cid" sh -c "grep -qsx srcds_linux /proc/[0-9]*/comm" || o=$?
-          n=0; out="$(docker exec "$cid" bash /healthcheck.sh 27015 2>&1)" || n=$?
+          # srcds_run restarts a srcds that dies, so the process can be gone for
+          # a moment; poll for four minutes. Required: at least one moment, a
+          # minute in, with the process there and this check red for want of a
+          # socket; and this check never green under this profile.
+          seen=""; green=0; samples=0
+          for _ in $(seq 1 24); do
+            sleep 10
+            o=0; docker exec "$cid" sh -c "grep -qsx srcds_linux /proc/[0-9]*/comm" || o=$?
+            n=0; out="$(docker exec "$cid" bash /healthcheck.sh 27015 2>&1)" || n=$?
+            samples=$((samples + 1))
+            [ "$n" = 0 ] && green=$((green + 1))
+            if [ "$SECONDS" -ge 60 ] && [ "$o" = 0 ] && [ "$n" = 1 ] && [[ $out == *"nothing is bound"* ]]; then
+              seen="$out"
+            fi
+          done
           st="$(docker inspect "$cid" --format '{{.State.Status}} restarts={{.RestartCount}}')"
-          echo "under 29.4.2's profile, 120 s in ($st): the old check exits $o, the new one $n: $out"
+          echo "under 29.4.2's profile ($st), $samples samples: this check green $green times; process there and this check red: ${seen:-never}"
           rm -f .ci-seccomp.yml .ci-seccomp-0.2.2.json
-          [ "$o" = 0 ] && [ "$n" = 1 ] && [[ $out == *"nothing is bound"* ]] || { echo "::error::expected a live process (0) and no socket (1, nothing is bound)"; exit 1; }
+          [ "$green" = 0 ] && [ -n "$seen" ] || { echo "::error::expected a live process with this check red (nothing is bound), and never green"; exit 1; }
           $COMPOSE up -d --force-recreate blackmesa-server
           cid="$($COMPOSE ps -q blackmesa-server)"
           for _ in $(seq 1 30); do
