@@ -70,8 +70,7 @@ services:
           "") echo "BLACKMESA_SERVER_RCON_PASSWORD is not set" >&2; exit 1 ;;
           *\"*) echo "BLACKMESA_SERVER_RCON_PASSWORD holds a double quote, which a Source config line cannot carry" >&2; exit 1 ;;
         esac
-        umask 077
-        printf "rcon_password \"%s\"\n" "$$BLACKMESA_SERVER_RCON_PASSWORD" > bms/cfg/secrets/rcon.cfg || exit 1
+        ( umask 077 && printf "rcon_password \"%s\"\n" "$$BLACKMESA_SERVER_RCON_PASSWORD" > bms/cfg/secrets/rcon.cfg ) || exit 1
         exec "$$@"
       - start-server
     tmpfs:
