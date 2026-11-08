@@ -118,7 +118,7 @@ services:
       # profile refuses. A hung or stopped game keeps its process too. The log
       # is not read either. A map change silences it for seconds; the check
       # tries twice and Docker allows three misses at this interval. Each check
-      # ends within 9 seconds.
+      # ends within 7 seconds.
       # It asks from inside the container: it does not prove the port is
       # published on the host or open in a firewall.
       # CI runs it in the pinned image against a stand-in, and on the real

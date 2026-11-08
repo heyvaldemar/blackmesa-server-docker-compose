@@ -24,7 +24,7 @@ Everyone who joins needs to own Black Mesa. There are no bots: this is player-ve
 
 ## What this file knows that a fresh one does not
 
-**The health check asks the game, not its process.** `tools/healthcheck.sh` sends A2S_INFO, the query every server browser sends, to the game port and is healthy only on the engine's reply. Up to v1.2.2 it looked for `srcds_linux` in `/proc`, and on Docker Engine 29.4.2 that stayed green over a server with no socket at all (below). A hung or stopped game keeps its process too, and the log is not read either. A map change silences it for seconds; one check tries twice, and Docker allows three misses at a 60-second interval. Each check ends within 9 seconds. **It asks from inside the container**, at the address the game is bound to: healthy proves the server answers there, not that the port is published on the host or open in your firewall. Check that from outside, with a server browser.
+**The health check asks the game, not its process.** `tools/healthcheck.sh` sends A2S_INFO, the query every server browser sends, to the game port and is healthy only on the engine's reply. Up to v1.2.2 it looked for `srcds_linux` in `/proc`, and on Docker Engine 29.4.2 that stayed green over a server with no socket at all (below). A hung or stopped game keeps its process too, and the log is not read either. A map change silences it for seconds; one check tries twice, and Docker allows three misses at a 60-second interval. Each check ends within 7 seconds. **It asks from inside the container**, at the address it answers on (the one it is bound to, or the container's own when it binds 0.0.0.0, as Left 4 Dead 2 does): healthy proves the server answers there, not that the port is published on the host or open in your firewall. Check that from outside, with a server browser.
 
 **The map cannot drift.** `mp_timelimit 0` and `mp_fraglimit 0` on the command line mean the map never changes on its own, and the one-entry `mapcycle.txt` is mounted at both paths srcds may read it from, because one copy in the wrong place is a rotation that silently does not exist. For a rotating server, set a time limit in `.env` and add maps.
 
@@ -61,7 +61,7 @@ The pin lives in the `x-images` block at the top of the compose file, as an inte
 CI boots the real server on every push, from the 16 GB image, and then:
 
 - runs `tools/rcon.sh status` and needs the hostname line back, and a wrong password refused;
-- runs the health check in the pinned image against a stand-in that answers A2S_INFO, answers after a challenge, stays silent, or is not there: healthy, healthy, unhealthy within 9 seconds, unhealthy (`tests/e2e-healthcheck.sh`);
+- runs the health check in the pinned image against a stand-in that answers A2S_INFO, answers after a challenge, stays silent, or is not there: healthy, healthy, unhealthy within 7 seconds, unhealthy (`tests/e2e-healthcheck.sh`);
 - changes the map over rcon and needs the health check to answer again on the new map, with Docker's status healthy throughout;
 - **stops the game process** with SIGSTOP: the process stays, the old `/proc` check still passes, and the health check must fail; after SIGCONT it must pass again;
 - **gives the container the seccomp profile Docker 29.4.2 shipped**: the server runs with no socket, the old check passes, and the health check must fail saying nothing is bound; recreated without it, the server must answer again.
