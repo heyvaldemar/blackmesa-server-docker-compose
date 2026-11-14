@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_(no unreleased changes yet)_
+
+## [1.4.1] - 2026-11-14
+
 ### Fixed
 
 - **A stop no longer waits out the grace period.** The entrypoint ends in `exec ./srcds_run`, a bash script, which made it the container's process 1, and process 1 with no handler for SIGTERM ignores it: every stop and restart waited the full 30 seconds and ended in Docker's SIGKILL (`tests/clean-stop.sh`: 30 s of 30, exit 137, [run 43617761533](https://github.com/heyvaldemar/blackmesa-server-docker-compose/actions/runs/43617761533)). The compose file now runs Docker's init (tini) as process 1, with `TINI_KILL_PROCESS_GROUP`, so SIGTERM reaches `srcds_run` and the game together. Black Mesa keeps no world, so nothing was lost, only the wait. CI now fails a stop that needs Docker's SIGKILL: 0 s of 30, exit 143 ([run 43622806452](https://github.com/heyvaldemar/blackmesa-server-docker-compose/actions/runs/43622806452)).
@@ -86,7 +90,8 @@ hes the game exactly rather than as a substring.**
   suite. It deliberately does not boot the game: the image is 16 GB
   compressed, and a test that pretends a runner can hold it never runs.
 
-[Unreleased]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.1...v1.2.2
