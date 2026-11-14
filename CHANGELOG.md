@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_(no unreleased changes yet)_
+
+## [1.4.0] - 2026-11-14
+
 ### Added
 
 - **CI looks for the RCON password everywhere it could leak to.** `tests/secret-probe.sh` gives it a value of its own and fails on it in `docker compose logs`, on any command line in the container or in the host's `ps`, after the first start, while `tools/rcon.sh` runs and after a restart; it names the variable and the place, never the value. It found nothing ([run 43617761533](https://github.com/heyvaldemar/blackmesa-server-docker-compose/actions/runs/43617761533)).
@@ -15,7 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **The health check could cut its own request in two.** bash writes printf's output line by line, so the query echoing the server's challenge went out as two datagrams whenever the challenge held a newline byte (0x0a), and that try went unanswered; one check in a few thousand, which the retries covered. The request now goes to a file first and out in one write. `tests/e2e-healthcheck.sh` proves it against a stand-in whose challenge holds one: the old check sends 26 and 3 bytes and stays unhealthy, this one one datagram of 29.
-
 - **An index pushed again over the same build is no longer reported as drift.** The daily pin check compared each pin with the digest the tag's index has now and failed on any difference, so a publisher re-pushing the index over the very same images (a platform added, an attestation rewritten) turned it red for an image nobody rebuilt, and no pin would ever move to turn it green. It now also compares the linux/amd64 build under both digests, the one CI runs and proves: the same build passes with a notice naming both digests, a new build fails as drift exactly as before, and a build that cannot be read still fails.
 
 ## [1.3.0] - 2026-11-08
@@ -80,7 +83,8 @@ hes the game exactly rather than as a substring.**
   suite. It deliberately does not boot the game: the image is 16 GB
   compressed, and a test that pretends a runner can hold it never runs.
 
-[Unreleased]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/heyvaldemar/blackmesa-server-docker-compose/compare/v1.2.0...v1.2.1
