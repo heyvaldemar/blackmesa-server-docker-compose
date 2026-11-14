@@ -61,8 +61,10 @@ The pin lives in the `x-images` block at the top of the compose file, as an inte
 CI boots the real server on every push, from the 16 GB image, and then:
 
 - runs `tools/rcon.sh status` and needs the hostname line back, and a wrong password refused;
-- runs the health check in the pinned image against a stand-in that answers A2S_INFO, answers after a challenge, stays silent, or is not there: healthy, healthy, unhealthy within 7 seconds, unhealthy (`tests/e2e-healthcheck.sh`);
+- runs the health check in the pinned image against a stand-in that answers A2S_INFO, answers after a challenge, answers after a challenge with a newline byte in it (the request must go out as one 29-byte datagram), stays silent, or is not there: healthy, healthy, healthy, unhealthy within 7 seconds, unhealthy (`tests/e2e-healthcheck.sh`);
 - changes the map over rcon and needs the health check to answer again on the new map, with Docker's status healthy throughout;
+- gives the RCON password a value of its own and looks for it in `docker compose logs`, on every command line in the container and in the host's `ps`, after the first start, while `tools/rcon.sh` runs and after a restart, naming the place, never the value (`tests/secret-probe.sh`);
+- times a `docker compose stop` and reads its exit code (`tests/clean-stop.sh`). Measured: 30 seconds of the 30-second grace period and exit 137, Docker's SIGKILL, because `srcds_run`, process 1 here, does not pass SIGTERM on. Black Mesa keeps no world, so nothing is lost; a stop or restart simply waits out the grace period;
 - **stops the game process** with SIGSTOP: the process stays, the old `/proc` check still passes, and the health check must fail; after SIGCONT it must pass again;
 - **gives the container the seccomp profile Docker 29.4.2 shipped**: the server runs with no socket, the old check passes, and the health check must fail saying nothing is bound; recreated without it, the server must answer again.
 
