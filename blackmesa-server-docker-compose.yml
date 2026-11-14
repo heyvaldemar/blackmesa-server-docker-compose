@@ -46,6 +46,8 @@ services:
     # more than one interface, with no error; the container's own bridge
     # namespace is why this starts.
     environment:
+      # tini (init: true) signals the whole process group.
+      TINI_KILL_PROCESS_GROUP: "1"
       # THE GAME GETS THE HOUSEHOLD CLOCK TOO, not only whatever sidecar
       # sits beside it. Every timestamp this server writes — bans, joins,
       # the crash it leaves behind — is read next to a log line from
@@ -62,6 +64,14 @@ services:
     # carries +exec secrets/rcon.cfg instead. A value with a double quote,
     # which a Source config line cannot carry, stops the start.
     # tests/e2e-rcon-secret.sh runs exactly this against a stand-in srcds_run.
+    # A STOP REACHES THE GAME. The entrypoint below ends in exec ./srcds_run,
+    # a bash script, which made it process 1, and process 1 with no handler
+    # for SIGTERM ignores it: every stop and restart waited out the grace
+    # period and ended in Docker's SIGKILL (30 s of 30, exit 137, CI run
+    # 43617761533). Docker's init (tini) is process 1 now, and with
+    # TINI_KILL_PROCESS_GROUP below it hands SIGTERM to srcds_run and srcds
+    # together.
+    init: true
     entrypoint:
       - /bin/sh
       - -c
@@ -130,8 +140,8 @@ services:
       # The game is baked into the image, and it is a large one: four minutes
       # covers the first map load on a slow disk.
       start_period: ${BLACKMESA_SERVER_START_PERIOD:-4m}
-    # srcds writes its state on the way out. Ten seconds and a SIGKILL is
-    # enough to lose the last round.
+    # The stop takes a second or two with init above (tests/clean-stop.sh);
+    # the grace period is the ceiling, not the wait.
     stop_grace_period: ${BLACKMESA_SERVER_STOP_GRACE_PERIOD:-30s}
     restart: unless-stopped
     logging:

@@ -315,8 +315,12 @@ jobs:
         env:
           CLEAN_STOP_PROJECT: blackmesa
           CLEAN_STOP_COMPOSE: blackmesa-server-docker-compose.yml
+        # srcds_run used to be process 1 and ignore SIGTERM (30 s of 30, exit
+        # 137, run 43617761533); with Docker's init the stop must not need
+        # Docker's SIGKILL.
         run: |
-          tests/clean-stop.sh blackmesa-server -
+          out="$(tests/clean-stop.sh blackmesa-server -)"; echo "$out"
+          if grep -q 'Docker sent SIGKILL' <<<"$out"; then echo "::error::the stop still ended in Docker's SIGKILL"; exit 1; fi
           $COMPOSE up -d blackmesa-server >/dev/null
 
       - name: Plant - Docker 29.4.2's seccomp profile, the server it left healthy with no socket
